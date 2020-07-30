@@ -1,0 +1,22 @@
+[package]
+name = "in-directory"
+version = "1.0.0"
+authors = ["Nathan West <Lucretiel@gmail.com>"]
+edition = "2018"
+
+readme = "README.md"
+license = "MPL-2.0"
+description = "A trivial utility for running a command in a specific working directory"
+repository = "https://github.com/Lucretiel/in"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libc = "0.2.78"
+structopt = "0.3.18"
+shell-escape = "0.1.5"
+joinery = "2.0.0"
+
+[[bin]]
+name = "in"
+path = "src/main.rs"

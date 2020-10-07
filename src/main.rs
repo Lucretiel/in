@@ -54,7 +54,7 @@ fn main() {
     if !args.no_pwd {
         let absolute_dir = env::current_dir().unwrap_or_else(|err| {
             eprintln!(
-                "Failed to change working directory tp {}:\n  {}",
+                "Failed to change working directory to {}:\n  {}",
                 &args.path.display(),
                 err
             );

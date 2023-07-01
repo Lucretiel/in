@@ -1,87 +1,74 @@
 /*
-Copyright 2020 Nathan West
+Copyright 2023 Nathan West
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 
+use std::{
+    borrow::Cow,
+    convert::Infallible,
+    env,
+    os::unix::process::CommandExt,
+    path,
+    process::{Command, ExitCode},
+};
+
+use clap::Parser;
 use joinery::prelude::*;
-use libc;
 use shell_escape;
-use std::{env, ffi, io, path, process, ptr};
-use structopt::{clap::AppSettings, StructOpt};
 
-fn parse_cstring(input: &str) -> Result<ffi::CString, ffi::NulError> {
-    ffi::CString::new(input.as_bytes())
-}
-
-fn run_io(task: impl FnOnce() -> libc::c_int) -> io::Result<()> {
-    if task() < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
-#[derive(StructOpt, Debug)]
-#[structopt(setting = AppSettings::TrailingVarArg)]
+#[derive(Parser, Debug)]
 struct Args {
     /// If given, the PWD variable is not modified
-    #[structopt(long, short)]
+    #[clap(long, short)]
     no_pwd: bool,
 
     /// The path to change to before running the command
     path: path::PathBuf,
 
     /// The command to run
-    #[structopt(required=true, parse(try_from_str = parse_cstring))]
-    command: Vec<ffi::CString>,
+    command: String,
+
+    /// Arguments to be forwarded to the command
+    args: Vec<String>,
 }
 
-fn main() {
-    let args: Args = Args::from_args();
+fn main() -> Result<Infallible, ExitCode> {
+    let args: Args = Args::parse();
 
-    env::set_current_dir(&args.path).unwrap_or_else(|err| {
-        eprintln!(
-            "Failed to change working directory to {}:\n  {}",
-            args.path.display(),
-            err
-        );
-        process::exit(1);
-    });
+    // We could use Command::current_dir, but we want to be able to use
+    // `env::current_dir` to update `PWD`
+    env::set_current_dir(&args.path).map_err(|err| {
+        let directory = args.path.display();
+        eprintln!("Failed to change working directory to {directory}:\n  {err}",);
 
+        ExitCode::FAILURE
+    })?;
+
+    // We could use Command::env, but it's too annoying to do conditionally
+    // (because the command builder is based on &mut self rather than self)
     if !args.no_pwd {
-        let absolute_dir = env::current_dir().unwrap_or_else(|err| {
-            eprintln!(
-                "Failed to change working directory to {}:\n  {}",
-                &args.path.display(),
-                err
-            );
-            process::exit(1);
-        });
+        let absolute_dir = env::current_dir().map_err(|err| {
+            let directory = args.path.display();
+            eprintln!("Failed to change working directory to {directory}:\n  {err}",);
+
+            ExitCode::FAILURE
+        })?;
 
         env::set_var("PWD", &absolute_dir);
     }
 
-    let program = args.command[0].as_ptr();
+    let err = Command::new(args.command.as_str()).args(&args.args).exec();
 
-    let command: Vec<*const libc::c_char> = args
-        .command
-        .iter()
-        .map(|arg| arg.as_ptr())
-        .chain(Some(ptr::null()))
-        .collect();
+    let formatted_command = [&args.command]
+        .into_iter()
+        .chain(&args.args)
+        .map(|arg| shell_escape::escape(Cow::Borrowed(arg.as_str())))
+        .join_with(" ");
 
-    run_io(|| unsafe { libc::execvp(program, command.as_ptr()) }).unwrap_or_else(|err| {
-        let command = args
-            .command
-            .iter()
-            .map(|arg| arg.to_string_lossy())
-            .map(|arg| shell_escape::escape(arg))
-            .join_with(" ");
+    eprintln!("Failed to run command: {formatted_command}\n  {err}");
 
-        eprintln!("Failed to run command: {}\n  {}", command, err);
-        process::exit(1);
-    });
+    Err(ExitCode::FAILURE)
 }
